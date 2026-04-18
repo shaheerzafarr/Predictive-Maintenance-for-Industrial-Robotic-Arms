@@ -140,6 +140,10 @@ feature_stats = data['feature_stats']
 models = data['models']
 regression = data['regression']
 Q = data['q_table']
+reg_degree_results = data.get('reg_degree_results', {})
+best_degree = data.get('best_degree', 2)
+reg_test_actual = data.get('reg_test_actual', [])
+reg_test_predicted = data.get('reg_test_predicted', [])
 
 state_names = ['Normal', 'Low Fault', 'Medium Fault', 'High Fault']
 action_names = ['✅ Continue Operating', '🔧 Schedule Maintenance', '🚨 Emergency Stop']
@@ -483,15 +487,18 @@ arm_html = f"""
             <g style="transform-origin: 90px 290px; animation: arm-sway 4s ease-in-out infinite;">
                 <rect x="75" y="170" width="30" height="120" rx="6" fill="url(#ag)" stroke="#4a5568" stroke-width="1.5"/>
                 <circle cx="90" cy="160" r="18" fill="url(#mg)" stroke="#4a5568" stroke-width="2"/>
-                <rect x="85" y="80" width="120" height="26" rx="6" fill="url(#ag)" stroke="#4a5568" stroke-width="1.5" transform="rotate(-25, 90, 160)"/>
-                <circle cx="195" cy="98" r="10" fill="url(#mg)" stroke="#4a5568" stroke-width="1.5"/>
-                <rect x="195" y="85" width="35" height="8" rx="3" fill="#5d6d7e" stroke="#4a5568" stroke-width="1" transform="rotate(-25, 195, 98)"/>
-                <rect x="195" y="102" width="35" height="8" rx="3" fill="#5d6d7e" stroke="#4a5568" stroke-width="1" transform="rotate(-25, 195, 98)"/>
+                <g transform="translate(90,160) rotate(-25)">
+                    <rect x="-5" y="-13" width="120" height="26" rx="6" fill="url(#ag)" stroke="#4a5568" stroke-width="1.5"/>
+                    <circle cx="115" cy="0" r="10" fill="url(#mg)" stroke="#4a5568" stroke-width="1.5"/>
+                    <rect x="115" y="-13" width="35" height="8" rx="3" fill="#5d6d7e" stroke="#4a5568" stroke-width="1"/>
+                    <rect x="115" y="5" width="35" height="8" rx="3" fill="#5d6d7e" stroke="#4a5568" stroke-width="1"/>
+                </g>
             </g>
 
-            <!-- CONNECTORS -->
-            <line x1="108" y1="160" x2="260" y2="130" stroke="#4a5568" stroke-width="1" stroke-dasharray="5,5" opacity="0.6"/>
-            <line x1="108" y1="160" x2="260" y2="260" stroke="#4a5568" stroke-width="1" stroke-dasharray="5,5" opacity="0.6"/>
+            <!-- COMPOUND CONNECTOR -->
+            <line x1="108" y1="160" x2="305" y2="150" stroke="#4a5568" stroke-width="2" stroke-dasharray="6,4" opacity="0.5"/>
+            <line x1="108" y1="160" x2="305" y2="240" stroke="#4a5568" stroke-width="2" stroke-dasharray="6,4" opacity="0.5"/>
+            <circle cx="108" cy="160" r="4" fill="#4a5568" opacity="0.4"/>
 
             <!-- BEARING -->
             <g transform="translate(370, 195)">
@@ -674,6 +681,189 @@ for name, m in models.items():
 
 compare_df = pd.DataFrame(compare_data)
 st.dataframe(compare_df, use_container_width=True, hide_index=True)
+
+
+# ─────────────────────────────────────────────────────────────
+# POLYNOMIAL REGRESSION ANALYSIS
+# ─────────────────────────────────────────────────────────────
+st.markdown("---")
+st.markdown("### 📈 Polynomial Regression — Severity Prediction")
+
+if reg_degree_results:
+    # Current prediction info
+    reg_col1, reg_col2 = st.columns([1, 1])
+
+    with reg_col1:
+        st.markdown("#### Degree Comparison")
+
+        degrees = sorted(reg_degree_results.keys())
+        rmse_vals = [reg_degree_results[d]['rmse'] for d in degrees]
+        r2_vals = [reg_degree_results[d]['r2'] for d in degrees]
+        mae_vals = [reg_degree_results[d]['mae'] for d in degrees]
+
+        # Degree comparison chart (RMSE + R² dual axis)
+        fig_deg = go.Figure()
+        fig_deg.add_trace(go.Bar(
+            x=[f'Degree {d}' for d in degrees],
+            y=rmse_vals,
+            name='RMSE',
+            marker_color='#3498db',
+            text=[f'{v:.5f}' for v in rmse_vals],
+            textposition='outside',
+            textfont=dict(size=11, color='white'),
+            yaxis='y'
+        ))
+        fig_deg.add_trace(go.Scatter(
+            x=[f'Degree {d}' for d in degrees],
+            y=r2_vals,
+            name='R²',
+            mode='lines+markers+text',
+            line=dict(color='#e74c3c', width=3),
+            marker=dict(size=10),
+            text=[f'{v:.4f}' for v in r2_vals],
+            textposition='top center',
+            textfont=dict(size=11, color='#e74c3c'),
+            yaxis='y2'
+        ))
+        fig_deg.update_layout(
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='white', size=12),
+            yaxis=dict(
+                title='RMSE',
+                title_font=dict(color='#3498db'),
+                gridcolor='rgba(255,255,255,0.1)',
+                side='left'
+            ),
+            yaxis2=dict(
+                title='R²',
+                title_font=dict(color='#e74c3c'),
+                overlaying='y',
+                side='right',
+                range=[0, 1.15]
+            ),
+            xaxis=dict(gridcolor='rgba(255,255,255,0.1)'),
+            height=350,
+            margin=dict(l=10, r=10, t=40, b=10),
+            legend=dict(x=0.4, y=1.1, orientation='h'),
+            title=dict(text=f'Best Degree: {best_degree}', font=dict(size=14, color='#00d2ff'))
+        )
+        st.plotly_chart(fig_deg, use_container_width=True)
+
+        # Metrics table
+        deg_table = pd.DataFrame([
+            {
+                'Degree': d,
+                'RMSE': f"{reg_degree_results[d]['rmse']:.6f}",
+                'MAE': f"{reg_degree_results[d]['mae']:.6f}",
+                'R²': f"{reg_degree_results[d]['r2']:.4f}",
+                '': '⭐' if d == best_degree else ''
+            }
+            for d in degrees
+        ])
+        st.dataframe(deg_table, use_container_width=True, hide_index=True)
+
+    with reg_col2:
+        st.markdown("#### Predicted vs Actual Severity")
+
+        if reg_test_actual and reg_test_predicted:
+            actual = np.array(reg_test_actual)
+            predicted = np.array(reg_test_predicted)
+
+            fig_reg = go.Figure()
+
+            # Scatter points
+            fig_reg.add_trace(go.Scatter(
+                x=actual,
+                y=predicted,
+                mode='markers',
+                name='Predictions',
+                marker=dict(color='#00d2ff', size=6, opacity=0.5,
+                            line=dict(width=0.5, color='white')),
+            ))
+
+            # Perfect prediction line
+            mn = min(actual.min(), predicted.min())
+            mx = max(actual.max(), predicted.max())
+            fig_reg.add_trace(go.Scatter(
+                x=[mn, mx], y=[mn, mx],
+                mode='lines', name='Perfect',
+                line=dict(color='#e74c3c', width=2, dash='dash')
+            ))
+
+            best_r2 = reg_degree_results[best_degree]['r2']
+            best_rmse = reg_degree_results[best_degree]['rmse']
+
+            fig_reg.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                font=dict(color='white', size=12),
+                xaxis=dict(title='Actual Severity (inches)',
+                           gridcolor='rgba(255,255,255,0.1)'),
+                yaxis=dict(title='Predicted Severity (inches)',
+                           gridcolor='rgba(255,255,255,0.1)'),
+                height=350,
+                margin=dict(l=10, r=10, t=40, b=10),
+                legend=dict(x=0.02, y=0.98),
+                title=dict(
+                    text=f'Degree {best_degree}  |  R²={best_r2:.4f}  |  RMSE={best_rmse:.6f}',
+                    font=dict(size=13, color='#a0aec0')
+                )
+            )
+            st.plotly_chart(fig_reg, use_container_width=True)
+
+            # Residual distribution
+            residuals = actual - predicted
+            fig_resid = go.Figure()
+            fig_resid.add_trace(go.Histogram(
+                x=residuals,
+                nbinsx=30,
+                marker_color='#3a7bd5',
+                opacity=0.8,
+                name='Residuals'
+            ))
+            fig_resid.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                font=dict(color='white', size=11),
+                xaxis=dict(title='Residual (Actual - Predicted)',
+                           gridcolor='rgba(255,255,255,0.1)'),
+                yaxis=dict(title='Count',
+                           gridcolor='rgba(255,255,255,0.1)'),
+                height=200,
+                margin=dict(l=10, r=10, t=30, b=10),
+                title=dict(text='Residual Distribution', font=dict(size=12, color='#a0aec0')),
+                showlegend=False
+            )
+            st.plotly_chart(fig_resid, use_container_width=True)
+        else:
+            st.info("Run `python save_models.py` to generate regression test data.")
+
+    # Current severity prediction card
+    st.markdown(f"""
+    <div class="prediction-card" style="margin-top: 1rem; padding: 1.2rem;">
+        <div style="display: flex; justify-content: space-around; align-items: center; flex-wrap: wrap;">
+            <div>
+                <div style="color: #a0aec0; font-size: 0.85rem;">Polynomial Degree Used</div>
+                <div style="color: #00d2ff; font-size: 1.5rem; font-weight: 700;">{best_degree}</div>
+            </div>
+            <div>
+                <div style="color: #a0aec0; font-size: 0.85rem;">Current Severity Prediction</div>
+                <div style="color: #00d2ff; font-size: 1.5rem; font-weight: 700;">{severity_pred:.4f}"</div>
+            </div>
+            <div>
+                <div style="color: #a0aec0; font-size: 0.85rem;">Best R² Score</div>
+                <div style="color: #00d2ff; font-size: 1.5rem; font-weight: 700;">{reg_degree_results[best_degree]['r2']:.4f}</div>
+            </div>
+            <div>
+                <div style="color: #a0aec0; font-size: 0.85rem;">Best RMSE</div>
+                <div style="color: #00d2ff; font-size: 1.5rem; font-weight: 700;">{reg_degree_results[best_degree]['rmse']:.6f}</div>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+else:
+    st.info("⚠️ Regression degree results not found. Run `python save_models.py` to generate.")
 
 
 # ─────────────────────────────────────────────────────────────

@@ -72,13 +72,56 @@ print("Training Regression...")
 mask = df['severity'] > 0
 X_reg = df.loc[mask, feature_cols].values
 y_reg = df.loc[mask, 'severity'].values
+
+from sklearn.model_selection import train_test_split as tts
+X_reg_train, X_reg_test, y_reg_train, y_reg_test = tts(
+    X_reg, y_reg, test_size=0.2, random_state=42)
+
 scaler_reg = StandardScaler()
-X_reg_sc = scaler_reg.fit_transform(X_reg)
+X_reg_train_sc = scaler_reg.fit_transform(X_reg_train)
+X_reg_test_sc = scaler_reg.transform(X_reg_test)
+
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+
+reg_degree_results = {}
+for degree in range(1, 5):
+    pipe = Pipeline([
+        ('poly', PolynomialFeatures(degree=degree, include_bias=False)),
+        ('reg', LinearRegression())
+    ])
+    pipe.fit(X_reg_train_sc, y_reg_train)
+    y_pred_r = pipe.predict(X_reg_test_sc)
+    rmse = float(np.sqrt(mean_squared_error(y_reg_test, y_pred_r)))
+    mae = float(mean_absolute_error(y_reg_test, y_pred_r))
+    r2 = float(r2_score(y_reg_test, y_pred_r))
+    reg_degree_results[degree] = {'rmse': rmse, 'mae': mae, 'r2': r2}
+    print(f"  Degree {degree}: RMSE={rmse:.6f}, MAE={mae:.6f}, R²={r2:.4f}")
+
+best_degree = min(reg_degree_results, key=lambda d: reg_degree_results[d]['rmse'])
+print(f"  Best Degree: {best_degree}")
+
+# Retrain best degree on ALL faulty data for deployment
+scaler_reg_full = StandardScaler()
+X_reg_full_sc = scaler_reg_full.fit_transform(X_reg)
 reg_pipe = Pipeline([
-    ('poly', PolynomialFeatures(degree=2, include_bias=False)),
+    ('poly', PolynomialFeatures(degree=best_degree, include_bias=False)),
     ('reg', LinearRegression())
 ])
-reg_pipe.fit(X_reg_sc, y_reg)
+reg_pipe.fit(X_reg_full_sc, y_reg)
+scaler_reg = scaler_reg_full  # use the full-data scaler for deployment
+
+# Also get test predictions for display (using the split scaler)
+scaler_reg_split = StandardScaler()
+X_reg_train_sc2 = scaler_reg_split.fit_transform(X_reg_train)
+X_reg_test_sc2 = scaler_reg_split.transform(X_reg_test)
+best_pipe_eval = Pipeline([
+    ('poly', PolynomialFeatures(degree=best_degree, include_bias=False)),
+    ('reg', LinearRegression())
+])
+best_pipe_eval.fit(X_reg_train_sc2, y_reg_train)
+y_reg_test_pred = best_pipe_eval.predict(X_reg_test_sc2)
+reg_test_actual = y_reg_test.tolist()
+reg_test_predicted = y_reg_test_pred.tolist()
 
 # Q-table
 Q = np.array([
@@ -135,6 +178,10 @@ models = {
         'Decision Tree': dt
     },
     'regression': reg_pipe,
+    'reg_degree_results': reg_degree_results,
+    'best_degree': best_degree,
+    'reg_test_actual': reg_test_actual,
+    'reg_test_predicted': reg_test_predicted,
     'q_table': Q
 }
 
